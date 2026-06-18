@@ -80,10 +80,28 @@ export class Visual implements IVisual {
         titleWrap.appendChild(titleEl);
         titleWrap.appendChild(subtitle);
 
+        const clearBtn = document.createElement("button");
+        clearBtn.textContent = "✕";
+        clearBtn.title = "Borrar chat y limpiar caché";
+        clearBtn.style.cssText = `
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            border-radius: 50%;
+            width: 24px; height: 24px;
+            cursor: pointer;
+            font-size: 11px;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            padding: 0;
+        `;
+        clearBtn.addEventListener("click", () => this.clearChat());
+
         header.appendChild(dot1);
         header.appendChild(dot2);
         header.appendChild(dot3);
         header.appendChild(titleWrap);
+        header.appendChild(clearBtn);
         this.target.appendChild(header);
 
         // Chat log
@@ -304,6 +322,18 @@ export class Visual implements IVisual {
             applyInline(line, p);
             container.appendChild(p);
         });
+    }
+
+    private async clearChat(): Promise<void> {
+        while (this.chatLog.firstChild) this.chatLog.removeChild(this.chatLog.firstChild);
+        try {
+            const parsed = new URL(this.apiUrl);
+            const ws = parsed.searchParams.get("ws") || "";
+            const ds = parsed.searchParams.get("ds") || "";
+            const base = parsed.origin + parsed.pathname.replace(/\/chat$/, "/cache");
+            await fetch(`${base}?ws=${encodeURIComponent(ws)}&ds=${encodeURIComponent(ds)}`, { method: "DELETE" });
+        } catch { /* ignorar errores de red al limpiar */ }
+        this.addBubble("Chat borrado. El esquema se recargará en la próxima consulta.", "bot");
     }
 
     private async sendQuestion(): Promise<void> {

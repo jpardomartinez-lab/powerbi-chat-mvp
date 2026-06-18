@@ -62,6 +62,13 @@ public class DaxController : ControllerBase
         return Ok(new { question = request.Question, answer, dax, rows });
     }
 
+    [HttpDelete("cache")]
+    public IActionResult ClearCache([FromQuery] string? workspace, [FromQuery] string? dataset)
+    {
+        _schema.ClearCache(workspace, dataset);
+        return Ok(new { message = "Caché limpiada." });
+    }
+
     [HttpGet("test")]
     public async Task<IActionResult> Test([FromQuery] string workspace, [FromQuery] string dataset)
     {

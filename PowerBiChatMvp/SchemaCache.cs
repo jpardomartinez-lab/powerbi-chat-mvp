@@ -9,6 +9,14 @@ public class SchemaCache
     private readonly Dictionary<string, string> _cache = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
 
+    public void ClearCache(string? workspaceName = null, string? datasetName = null)
+    {
+        if (workspaceName != null && datasetName != null)
+            _cache.Remove($"{workspaceName}|{datasetName}");
+        else
+            _cache.Clear();
+    }
+
     public async Task<string> GetPromptAsync(IConfiguration config, string workspaceName, string datasetName)
     {
         var key = $"{workspaceName}|{datasetName}";
