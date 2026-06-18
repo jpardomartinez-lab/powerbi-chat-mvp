@@ -9,6 +9,8 @@ namespace PowerBiChatMvp.Controllers;
 public class ChatRequest
 {
     public string Question { get; set; } = string.Empty;
+    public string WorkspaceName { get; set; } = string.Empty;
+    public string DatasetName { get; set; } = string.Empty;
 }
 
 [ApiController]
@@ -27,9 +29,12 @@ public class DaxController : ControllerBase
     [HttpPost("chat")]
     public async Task<IActionResult> Chat([FromBody] ChatRequest request)
     {
-        await _schema.EnsureLoadedAsync(_config);
+        if (string.IsNullOrWhiteSpace(request.WorkspaceName) || string.IsNullOrWhiteSpace(request.DatasetName))
+            return BadRequest("WorkspaceName y DatasetName son obligatorios.");
 
-        var dax = await GenerateDaxAsync(request.Question);
+        var schemaPrompt = await _schema.GetPromptAsync(_config, request.WorkspaceName, request.DatasetName);
+
+        var dax = await GenerateDaxAsync(request.Question, schemaPrompt);
 
         // Limpiar bloques markdown si Claude los añadió
         dax = System.Text.RegularExpressions.Regex.Replace(dax, @"```[a-zA-Z]*\s*", "").Replace("```", "").Trim();
@@ -40,7 +45,7 @@ public class DaxController : ControllerBase
 
         ValidateDax(dax);
 
-        var rows = await ExecuteDaxAsync(dax);
+        var rows = await ExecuteDaxAsync(dax, request.WorkspaceName, request.DatasetName);
 
         var rowsForAnswer = rows.Count > 100 ? rows.Take(100).ToList() : rows;
         var answer = await GenerateAnswerAsync(request.Question, dax, rowsForAnswer, rows.Count);
@@ -49,16 +54,18 @@ public class DaxController : ControllerBase
     }
 
     [HttpGet("test")]
-    public async Task<IActionResult> Test()
+    public async Task<IActionResult> Test([FromQuery] string workspace, [FromQuery] string dataset)
     {
-        await _schema.EnsureLoadedAsync(_config);
-        return Ok(new { schema = _schema.Prompt });
+        if (string.IsNullOrWhiteSpace(workspace) || string.IsNullOrWhiteSpace(dataset))
+            return BadRequest("workspace y dataset son obligatorios.");
+        var prompt = await _schema.GetPromptAsync(_config, workspace, dataset);
+        return Ok(new { schema = prompt });
     }
 
     [HttpGet("schema-keys")]
-    public async Task<IActionResult> SchemaKeys()
+    public async Task<IActionResult> SchemaKeys([FromQuery] string workspace, [FromQuery] string dataset)
     {
-        var (connection, _) = await OpenConnectionAsync();
+        var (connection, _) = await OpenConnectionAsync(workspace, dataset);
         using var conn = connection;
 
         using var cmd = conn.CreateCommand();
@@ -73,7 +80,7 @@ public class DaxController : ControllerBase
         return Ok(keys);
     }
 
-    private async Task<string> GenerateDaxAsync(string question)
+    private async Task<string> GenerateDaxAsync(string question, string schemaPrompt)
     {
         var client = new AnthropicClient() { ApiKey = _config["Anthropic:ApiKey"] };
 
@@ -81,7 +88,7 @@ public class DaxController : ControllerBase
         {
             Model = "claude-haiku-4-5",
             MaxTokens = 1024,
-            System = _schema.Prompt,
+            System = schemaPrompt,
             Messages = [new() { Role = Role.User, Content = question }]
         });
 
@@ -142,9 +149,9 @@ public class DaxController : ControllerBase
                 throw new InvalidOperationException($"DAX bloqueado por contener patrón: {pattern}");
     }
 
-    private async Task<List<Dictionary<string, object?>>> ExecuteDaxAsync(string dax)
+    private async Task<List<Dictionary<string, object?>>> ExecuteDaxAsync(string dax, string workspaceName, string datasetName)
     {
-        var (connection, _) = await OpenConnectionAsync();
+        var (connection, _) = await OpenConnectionAsync(workspaceName, datasetName);
         using var conn = connection;
 
         using var command = conn.CreateCommand();
@@ -163,13 +170,13 @@ public class DaxController : ControllerBase
         return result;
     }
 
-    internal async Task<(AdomdConnection, string)> OpenConnectionAsync()
+    internal async Task<(AdomdConnection, string)> OpenConnectionAsync(string? workspaceName = null, string? datasetName = null)
     {
         var tenantId = _config["PowerBI:TenantId"];
         var clientId = _config["PowerBI:ClientId"];
         var clientSecret = _config["PowerBI:ClientSecret"];
-        var workspaceName = _config["PowerBI:WorkspaceName"];
-        var datasetName = _config["PowerBI:DatasetName"];
+        workspaceName ??= _config["PowerBI:WorkspaceName"];
+        datasetName ??= _config["PowerBI:DatasetName"];
 
         var app = ConfidentialClientApplicationBuilder
             .Create(clientId)

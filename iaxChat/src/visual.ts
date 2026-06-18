@@ -2,13 +2,13 @@
 
 import powerbi from "powerbi-visuals-api";
 import "./../style/visual.less";
+import { FormattingSettingsService } from "powerbi-visuals-utils-formattingmodel";
+import { VisualFormattingSettingsModel } from "./settings";
 
 import VisualConstructorOptions = powerbi.extensibility.visual.VisualConstructorOptions;
 import VisualUpdateOptions = powerbi.extensibility.visual.VisualUpdateOptions;
 import IVisual = powerbi.extensibility.visual.IVisual;
 import IVisualEventService = powerbi.extensibility.IVisualEventService;
-
-const API_URL = "http://localhost:5211/api/dax/chat";
 
 export class Visual implements IVisual {
     private events: IVisualEventService;
@@ -17,10 +17,14 @@ export class Visual implements IVisual {
     private button: HTMLButtonElement;
     private answerBox: HTMLDivElement;
     private loading: HTMLDivElement;
+    private formattingSettings: VisualFormattingSettingsModel;
+    private formattingSettingsService: FormattingSettingsService;
 
     constructor(options: VisualConstructorOptions) {
         this.events = options.host.eventService;
         this.target = options.element;
+        this.formattingSettingsService = new FormattingSettingsService();
+        this.formattingSettings = new VisualFormattingSettingsModel();
         this.buildUI();
     }
 
@@ -65,15 +69,24 @@ export class Visual implements IVisual {
         const question = this.input.value.trim();
         if (!question) return;
 
+        const apiUrl = this.formattingSettings.apiSettings.apiUrl.value || "http://localhost:5211/api/dax/chat";
+        const workspaceName = this.formattingSettings.apiSettings.workspaceName.value;
+        const datasetName = this.formattingSettings.apiSettings.datasetName.value;
+
+        if (!workspaceName || !datasetName) {
+            this.answerBox.textContent = "Configura el Workspace y el Dataset en el panel de formato.";
+            return;
+        }
+
         this.button.disabled = true;
         this.loading.style.display = "block";
         this.answerBox.textContent = "";
 
         try {
-            const response = await fetch(API_URL, {
+            const response = await fetch(apiUrl, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question })
+                body: JSON.stringify({ question, workspaceName, datasetName })
             });
 
             if (!response.ok) {
@@ -94,6 +107,12 @@ export class Visual implements IVisual {
 
     public update(options: VisualUpdateOptions): void {
         this.events.renderingStarted(options);
+        if (options.dataViews && options.dataViews[0]) {
+            this.formattingSettings = this.formattingSettingsService.populateFormattingSettingsModel(
+                VisualFormattingSettingsModel,
+                options.dataViews[0]
+            );
+        }
         if (!this.input) {
             this.buildUI();
         }
@@ -101,6 +120,6 @@ export class Visual implements IVisual {
     }
 
     public getFormattingModel(): powerbi.visuals.FormattingModel {
-        return { cards: [] };
+        return this.formattingSettingsService.buildFormattingModel(this.formattingSettings);
     }
 }

@@ -6,20 +6,21 @@ namespace PowerBiChatMvp;
 
 public class SchemaCache
 {
-    private string? _prompt;
+    private readonly Dictionary<string, string> _cache = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
 
-    public string Prompt => _prompt ?? "Esquema no cargado.";
-
-    public async Task EnsureLoadedAsync(IConfiguration config)
+    public async Task<string> GetPromptAsync(IConfiguration config, string workspaceName, string datasetName)
     {
-        if (_prompt != null) return;
+        var key = $"{workspaceName}|{datasetName}";
+        if (_cache.TryGetValue(key, out var cached)) return cached;
 
         await _lock.WaitAsync();
         try
         {
-            if (_prompt != null) return;
-            _prompt = await BuildPromptAsync(config);
+            if (_cache.TryGetValue(key, out cached)) return cached;
+            var prompt = await BuildPromptAsync(config, workspaceName, datasetName);
+            _cache[key] = prompt;
+            return prompt;
         }
         finally
         {
@@ -27,13 +28,11 @@ public class SchemaCache
         }
     }
 
-    private static async Task<string> BuildPromptAsync(IConfiguration config)
+    private static async Task<string> BuildPromptAsync(IConfiguration config, string workspaceName, string datasetName)
     {
         var tenantId = config["PowerBI:TenantId"];
         var clientId = config["PowerBI:ClientId"];
         var clientSecret = config["PowerBI:ClientSecret"];
-        var workspaceName = config["PowerBI:WorkspaceName"];
-        var datasetName = config["PowerBI:DatasetName"];
 
         var app = ConfidentialClientApplicationBuilder
             .Create(clientId)
@@ -58,7 +57,7 @@ public class SchemaCache
         var columns = QuerySchema(connection, "SELECT * FROM $SYSTEM.TMSCHEMA_COLUMNS");
         var measures = QuerySchema(connection, "SELECT * FROM $SYSTEM.TMSCHEMA_MEASURES");
 
-        return BuildPrompt(datasetName!, tables, columns, measures);
+        return BuildPrompt(datasetName, tables, columns, measures);
     }
 
     private static List<Dictionary<string, object?>> QuerySchema(AdomdConnection connection, string dax)
