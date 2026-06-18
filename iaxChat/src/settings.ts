@@ -9,28 +9,14 @@ import FormattingSettingsModel = formattingSettings.Model;
 class ApiSettingsCard extends FormattingSettingsCard {
     apiUrl = new formattingSettings.TextInput({
         name: "apiUrl",
-        displayName: "URL de la API",
-        placeholder: "http://localhost:5211/api/dax/chat",
-        value: "http://localhost:5211/api/dax/chat"
-    });
-
-    workspaceName = new formattingSettings.TextInput({
-        name: "workspaceName",
-        displayName: "Workspace Power BI",
-        placeholder: "Nombre del workspace",
-        value: ""
-    });
-
-    datasetName = new formattingSettings.TextInput({
-        name: "datasetName",
-        displayName: "Dataset / Modelo",
-        placeholder: "Nombre del dataset",
+        displayName: "URL de la API (incluye ?ws=WORKSPACE&ds=DATASET)",
+        placeholder: "http://localhost:5211/api/dax/chat?ws=WORKSPACE&ds=DATASET",
         value: ""
     });
 
     name: string = "apiSettings";
     displayName: string = "Configuración API";
-    slices: Array<FormattingSettingsSlice> = [this.apiUrl, this.workspaceName, this.datasetName];
+    slices: Array<FormattingSettingsSlice> = [this.apiUrl];
 }
 
 export class VisualFormattingSettingsModel extends FormattingSettingsModel {

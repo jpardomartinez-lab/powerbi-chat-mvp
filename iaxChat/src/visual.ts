@@ -69,12 +69,29 @@ export class Visual implements IVisual {
         const question = this.input.value.trim();
         if (!question) return;
 
-        const apiUrl = this.formattingSettings.apiSettings.apiUrl.value || "http://localhost:5211/api/dax/chat";
-        const workspaceName = this.formattingSettings.apiSettings.workspaceName.value;
-        const datasetName = this.formattingSettings.apiSettings.datasetName.value;
+        const rawUrl = this.formattingSettings.apiSettings.apiUrl.value || "";
+        if (!rawUrl) {
+            this.answerBox.textContent = "Configura la URL en el panel de formato. Ejemplo: http://localhost:5211/api/dax/chat?ws=WORKSPACE&ds=DATASET";
+            return;
+        }
+
+        let baseUrl: string;
+        let workspaceName: string;
+        let datasetName: string;
+        try {
+            const parsed = new URL(rawUrl);
+            workspaceName = parsed.searchParams.get("ws") || "";
+            datasetName = parsed.searchParams.get("ds") || "";
+            parsed.searchParams.delete("ws");
+            parsed.searchParams.delete("ds");
+            baseUrl = parsed.toString();
+        } catch {
+            this.answerBox.textContent = "URL inválida en el panel de formato.";
+            return;
+        }
 
         if (!workspaceName || !datasetName) {
-            this.answerBox.textContent = "Configura el Workspace y el Dataset en el panel de formato.";
+            this.answerBox.textContent = "La URL debe incluir ?ws=WORKSPACE&ds=DATASET";
             return;
         }
 
@@ -83,7 +100,7 @@ export class Visual implements IVisual {
         this.answerBox.textContent = "";
 
         try {
-            const response = await fetch(apiUrl, {
+            const response = await fetch(baseUrl, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ question, workspaceName, datasetName })
@@ -107,12 +124,10 @@ export class Visual implements IVisual {
 
     public update(options: VisualUpdateOptions): void {
         this.events.renderingStarted(options);
-        if (options.dataViews && options.dataViews[0]) {
-            this.formattingSettings = this.formattingSettingsService.populateFormattingSettingsModel(
-                VisualFormattingSettingsModel,
-                options.dataViews[0]
-            );
-        }
+        this.formattingSettings = this.formattingSettingsService.populateFormattingSettingsModel(
+            VisualFormattingSettingsModel,
+            options.dataViews?.[0]
+        );
         if (!this.input) {
             this.buildUI();
         }
