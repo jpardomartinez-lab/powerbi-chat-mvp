@@ -1,0 +1,6 @@
+@PowerBiChatMvp_HostAddress = http://localhost:5211
+
+GET {{PowerBiChatMvp_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

@@ -1,0 +1,27 @@
+{
+    "dataRoles": [
+        {
+            "displayName": "Datos",
+            "name": "values",
+            "kind": "Measure"
+        }
+    ],
+    "objects": {},
+    "dataViewMappings": [
+        {
+            "conditions": [
+                { "values": { "max": 1 } }
+            ],
+            "single": {
+                "role": "values"
+            }
+        }
+    ],
+    "privileges": [
+        {
+            "name": "WebAccess",
+            "essential": true,
+            "parameters": ["http://localhost:5211/*"]
+        }
+    ]
+}

@@ -1,0 +1,25 @@
+# Secrets
+**/appsettings.Development.json
+**/appsettings.Local.json
+
+# Build output
+**/bin/
+**/obj/
+**/.tmp/
+**/dist/
+**/node_modules/
+
+# Certificates
+*.pfx
+*.pem
+
+# Power BI
+*.pbiviz
+*.pbix
+
+# Logs
+*.log
+
+# VS
+.vs/
+*.user
