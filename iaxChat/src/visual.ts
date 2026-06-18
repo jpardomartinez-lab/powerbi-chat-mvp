@@ -194,22 +194,116 @@ export class Visual implements IVisual {
 
         const bubble = document.createElement("div");
         bubble.style.cssText = `
-            max-width: 85%;
-            padding: 8px 12px;
+            max-width: 88%;
+            padding: 10px 14px;
             border-radius: ${isUser ? "16px 16px 4px 16px" : "16px 16px 16px 4px"};
             font-size: 12px;
-            line-height: 1.5;
-            white-space: pre-wrap;
+            line-height: 1.6;
             word-break: break-word;
             background: ${isUser ? `linear-gradient(135deg, ${C.blue}, #155a94)` : C.bgBot};
             color: ${isUser ? C.textLight : C.text};
             border: ${isUser ? "none" : `1px solid ${C.border}`};
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.10);
         `;
-        bubble.textContent = text;
+
+        if (isUser) {
+            bubble.textContent = text;
+        } else {
+            this.renderMarkdown(text, bubble);
+        }
+
         wrap.appendChild(bubble);
         this.chatLog.appendChild(wrap);
         this.chatLog.scrollTop = this.chatLog.scrollHeight;
+    }
+
+    private renderMarkdown(text: string, container: HTMLElement): void {
+        const lines = text.split("\n");
+        let inList = false;
+        let listEl: HTMLElement | null = null;
+
+        const closeList = () => { inList = false; listEl = null; };
+
+        const applyInline = (line: string, parent: HTMLElement): void => {
+            // Bold: **text**
+            const parts = line.split(/(\*\*[^*]+\*\*)/g);
+            parts.forEach(p => {
+                if (p.startsWith("**") && p.endsWith("**")) {
+                    const b = document.createElement("strong");
+                    b.textContent = p.slice(2, -2);
+                    b.style.color = C.blue;
+                    parent.appendChild(b);
+                } else if (p) {
+                    parent.appendChild(document.createTextNode(p));
+                }
+            });
+        };
+
+        lines.forEach(raw => {
+            const line = raw.trimEnd();
+
+            // Blank line
+            if (!line.trim()) {
+                closeList();
+                const sp = document.createElement("div");
+                sp.style.height = "4px";
+                container.appendChild(sp);
+                return;
+            }
+
+            // H1/H2: # or ##
+            if (/^#{1,2} /.test(line)) {
+                closeList();
+                const h = document.createElement("div");
+                h.style.cssText = `font-weight:700;font-size:13px;color:${C.blue};margin:6px 0 3px;border-bottom:1px solid ${C.border};padding-bottom:3px;`;
+                h.textContent = line.replace(/^#+\s/, "");
+                container.appendChild(h);
+                return;
+            }
+
+            // Numbered list: 1. item
+            if (/^\d+\.\s/.test(line)) {
+                if (!inList) {
+                    listEl = document.createElement("ol");
+                    listEl.style.cssText = `margin:4px 0;padding-left:18px;`;
+                    container.appendChild(listEl);
+                    inList = true;
+                }
+                const li = document.createElement("li");
+                li.style.cssText = `margin:3px 0;`;
+                applyInline(line.replace(/^\d+\.\s/, ""), li);
+                listEl!.appendChild(li);
+                return;
+            }
+
+            // Bullet list: - or *
+            if (/^[-*•]\s/.test(line)) {
+                if (!inList) {
+                    listEl = document.createElement("ul");
+                    listEl.style.cssText = `margin:4px 0;padding-left:16px;list-style:none;`;
+                    container.appendChild(listEl);
+                    inList = true;
+                }
+                const li = document.createElement("li");
+                li.style.cssText = `margin:3px 0;display:flex;gap:6px;align-items:baseline;`;
+                const dot = document.createElement("span");
+                dot.textContent = "•";
+                dot.style.cssText = `color:${C.teal};font-size:14px;flex-shrink:0;`;
+                li.appendChild(dot);
+                const txt = document.createElement("span");
+                applyInline(line.replace(/^[-*•]\s/, ""), txt);
+                li.appendChild(txt);
+                listEl!.appendChild(li);
+                return;
+            }
+
+            // Normal paragraph
+            closeList();
+            const p = document.createElement("div");
+            p.style.cssText = `margin:2px 0;`;
+            applyInline(line, p);
+            container.appendChild(p);
+        });
     }
 
     private async sendQuestion(): Promise<void> {
