@@ -45,7 +45,16 @@ public class DaxController : ControllerBase
 
         ValidateDax(dax);
 
-        var rows = await ExecuteDaxAsync(dax, request.WorkspaceName, request.DatasetName);
+        List<Dictionary<string, object?>> rows;
+        try
+        {
+            rows = await ExecuteDaxAsync(dax, request.WorkspaceName, request.DatasetName);
+        }
+        catch (Exception ex)
+        {
+            var daxError = ex.Message.Split('\n')[0].Trim();
+            return BadRequest(new { message = $"Error en la consulta DAX: {daxError}", dax });
+        }
 
         var rowsForAnswer = rows.Count > 100 ? rows.Take(100).ToList() : rows;
         var answer = await GenerateAnswerAsync(request.Question, dax, rowsForAnswer, rows.Count);

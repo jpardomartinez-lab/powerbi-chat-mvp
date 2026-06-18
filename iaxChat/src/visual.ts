@@ -343,8 +343,12 @@ export class Visual implements IVisual {
             });
 
             if (!response.ok) {
-                const err = await response.text();
-                this.addBubble("Error: " + err, "bot");
+                let errMsg = "Error al procesar la consulta.";
+                try {
+                    const errBody = await response.json();
+                    errMsg = errBody?.message ?? errBody?.title ?? errMsg;
+                } catch { /* respuesta no es JSON */ }
+                this.addBubble("⚠️ " + errMsg, "bot");
                 return;
             }
 
