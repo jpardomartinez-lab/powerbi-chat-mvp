@@ -36,8 +36,9 @@ public class DaxController : ControllerBase
 
         var dax = await GenerateDaxAsync(request.Question, schemaPrompt);
 
-        // Limpiar bloques markdown si Claude los añadió
+        // Limpiar bloques markdown y tags XML/HTML que Claude pueda añadir
         dax = System.Text.RegularExpressions.Regex.Replace(dax, @"```[a-zA-Z]*\s*", "").Replace("```", "").Trim();
+        dax = System.Text.RegularExpressions.Regex.Replace(dax, @"<[^>]+>", "").Trim();
 
         // Si Claude omitió EVALUATE, añadirlo
         if (!dax.TrimStart().StartsWith("EVALUATE", StringComparison.OrdinalIgnoreCase))
