@@ -2,13 +2,15 @@
 
 import powerbi from "powerbi-visuals-api";
 import "./../style/visual.less";
-import { FormattingSettingsService } from "powerbi-visuals-utils-formattingmodel";
-import { VisualFormattingSettingsModel } from "./settings";
 
 import VisualConstructorOptions = powerbi.extensibility.visual.VisualConstructorOptions;
 import VisualUpdateOptions = powerbi.extensibility.visual.VisualUpdateOptions;
+import EnumerateVisualObjectInstancesOptions = powerbi.EnumerateVisualObjectInstancesOptions;
+import VisualObjectInstanceEnumeration = powerbi.VisualObjectInstanceEnumeration;
 import IVisual = powerbi.extensibility.visual.IVisual;
 import IVisualEventService = powerbi.extensibility.IVisualEventService;
+
+const DEFAULT_URL = "http://localhost:5211/api/dax/chat?ws=WORKSPACE&ds=DATASET";
 
 export class Visual implements IVisual {
     private events: IVisualEventService;
@@ -17,14 +19,11 @@ export class Visual implements IVisual {
     private button: HTMLButtonElement;
     private answerBox: HTMLDivElement;
     private loading: HTMLDivElement;
-    private formattingSettings: VisualFormattingSettingsModel;
-    private formattingSettingsService: FormattingSettingsService;
+    private apiUrl: string = DEFAULT_URL;
 
     constructor(options: VisualConstructorOptions) {
         this.events = options.host.eventService;
         this.target = options.element;
-        this.formattingSettingsService = new FormattingSettingsService();
-        this.formattingSettings = new VisualFormattingSettingsModel();
         this.buildUI();
     }
 
@@ -69,24 +68,18 @@ export class Visual implements IVisual {
         const question = this.input.value.trim();
         if (!question) return;
 
-        const rawUrl = this.formattingSettings.apiSettings.apiUrl.value || "";
-        if (!rawUrl) {
-            this.answerBox.textContent = "Configura la URL en el panel de formato. Ejemplo: http://localhost:5211/api/dax/chat?ws=WORKSPACE&ds=DATASET";
-            return;
-        }
-
         let baseUrl: string;
         let workspaceName: string;
         let datasetName: string;
         try {
-            const parsed = new URL(rawUrl);
+            const parsed = new URL(this.apiUrl);
             workspaceName = parsed.searchParams.get("ws") || "";
             datasetName = parsed.searchParams.get("ds") || "";
             parsed.searchParams.delete("ws");
             parsed.searchParams.delete("ds");
             baseUrl = parsed.toString();
         } catch {
-            this.answerBox.textContent = "URL inválida en el panel de formato.";
+            this.answerBox.textContent = "URL inválida. Configura en el panel de formato: http://servidor/api/dax/chat?ws=WORKSPACE&ds=DATASET";
             return;
         }
 
@@ -124,17 +117,21 @@ export class Visual implements IVisual {
 
     public update(options: VisualUpdateOptions): void {
         this.events.renderingStarted(options);
-        this.formattingSettings = this.formattingSettingsService.populateFormattingSettingsModel(
-            VisualFormattingSettingsModel,
-            options.dataViews?.[0]
-        );
+        const objects = options.dataViews?.[0]?.metadata?.objects;
+        if (objects?.["apiSettings"]?.["apiUrl"]) {
+            this.apiUrl = objects["apiSettings"]["apiUrl"] as string;
+        }
         if (!this.input) {
             this.buildUI();
         }
         this.events.renderingFinished(options);
     }
 
-    public getFormattingModel(): powerbi.visuals.FormattingModel {
-        return this.formattingSettingsService.buildFormattingModel(this.formattingSettings);
+    public enumerateObjectInstances(options: EnumerateVisualObjectInstancesOptions): VisualObjectInstanceEnumeration {
+        return [{
+            objectName: options.objectName,
+            properties: { apiUrl: this.apiUrl },
+            selector: null
+        }];
     }
 }

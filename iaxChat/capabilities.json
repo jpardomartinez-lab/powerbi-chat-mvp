@@ -6,7 +6,17 @@
             "kind": "Measure"
         }
     ],
-    "objects": {},
+    "objects": {
+        "apiSettings": {
+            "displayName": "Configuración API",
+            "properties": {
+                "apiUrl": {
+                    "displayName": "URL de la API (?ws=WORKSPACE&ds=DATASET)",
+                    "type": { "text": true }
+                }
+            }
+        }
+    },
     "dataViewMappings": [
         {
             "conditions": [
