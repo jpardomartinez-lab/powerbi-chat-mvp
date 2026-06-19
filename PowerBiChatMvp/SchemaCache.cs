@@ -198,14 +198,16 @@ public class SchemaCache
             - Genera únicamente DAX. La consulta debe empezar por EVALUATE.
             - Usa solo tablas, columnas y medidas listadas arriba. No inventes nombres.
             - No expliques nada. No uses markdown.
-            - DAX NO tiene WHERE. Para filtrar usa CALCULATETABLE o FILTER.
+            - DAX NUNCA usa WHERE. WHERE no existe en DAX. Está PROHIBIDO escribir WHERE. Para filtrar: CALCULATETABLE o FILTER.
+            - Ejemplo CORRECTO con filtro año: EVALUATE CALCULATETABLE(SUMMARIZECOLUMNS(Tabla[Empresa], "Fact", [Medida]), YEAR(Tabla[Fecha]) = 2025)
+            - Ejemplo INCORRECTO (NUNCA hacer): EVALUATE SUMMARIZECOLUMNS(...) WHERE YEAR(...) = 2025
             - DAX NO tiene ORDER BY ni RETURN. Para ordenar usa TOPN(N, tabla, [Medida], DESC).
             - DAX NO tiene OR como palabra clave. Usa || para OR lógico, && para AND lógico.
             - DAX NO tiene IN con subconsultas. Usa TREATAS o FILTER con RELATED.
             - SUMMARIZECOLUMNS solo acepta columnas reales como argumentos de agrupación, NO expresiones.
             - SUMMARIZECOLUMNS con filtro: usa CALCULATETABLE(SUMMARIZECOLUMNS(...), condicion) — NO pongas FILTER dentro de SUMMARIZECOLUMNS directamente.
             - Para agrupar por expresión (mes, año...) usa ADDCOLUMNS sobre SUMMARIZE.
-            - Para filtrar por año: CALCULATETABLE(SUMMARIZECOLUMNS(...), YEAR(Tabla[Fecha]) = YEAR(TODAY()))
+            - Para filtrar por año actual: CALCULATETABLE(SUMMARIZECOLUMNS(...), YEAR(Tabla[Fecha]) = YEAR(TODAY()))
             - Para Top N: EVALUATE TOPN(5, SUMMARIZECOLUMNS(Tabla[Col], "Medida", [Medida]), [Medida], DESC)
             - Para devolver escalar: EVALUATE ROW("Resultado", CALCULATE([Medida]))
             - ROW() requiere pares nombre-valor: ROW("n1", v1, "n2", v2). Nunca ROW con un solo argumento.

@@ -72,17 +72,33 @@ public class DaxController : ControllerBase
 
         ValidateDax(dax);
 
-        List<Dictionary<string, object?>> rows;
-        try
+        List<Dictionary<string, object?>> rows = [];
+        string? lastDaxError = null;
+        const int maxRetries = 2;
+
+        for (var attempt = 0; attempt <= maxRetries; attempt++)
         {
-            rows = modoSsas
-                ? await ExecuteDaxSsasAsync(dax, request.Server, request.Database)
-                : await ExecuteDaxAsync(dax, request.WorkspaceName, request.DatasetName);
-        }
-        catch (Exception ex)
-        {
-            var daxError = ex.Message.Split('\n')[0].Trim();
-            return BadRequest(new { message = $"Error en la consulta DAX: {daxError}", dax });
+            try
+            {
+                rows = modoSsas
+                    ? await ExecuteDaxSsasAsync(dax, request.Server, request.Database)
+                    : await ExecuteDaxAsync(dax, request.WorkspaceName, request.DatasetName);
+                lastDaxError = null;
+                break;
+            }
+            catch (Exception ex)
+            {
+                lastDaxError = ex.Message.Split('\n')[0].Trim();
+                if (attempt >= maxRetries)
+                    return BadRequest(new { message = $"Error en la consulta DAX tras {maxRetries + 1} intentos: {lastDaxError}", dax });
+
+                // Pide a Claude que corrija el DAX con el error real
+                dax = await FixDaxAsync(request.Question, schemaPrompt, dax, lastDaxError);
+                dax = System.Text.RegularExpressions.Regex.Replace(dax, @"```[a-zA-Z]*\s*", "").Replace("```", "").Trim();
+                dax = System.Text.RegularExpressions.Regex.Replace(dax, @"<[^>]+>", "").Trim();
+                if (!dax.TrimStart().StartsWith("EVALUATE", StringComparison.OrdinalIgnoreCase))
+                    dax = "EVALUATE\n" + dax.TrimStart();
+            }
         }
 
         var rowsForAnswer = rows.Count > 100 ? rows.Take(100).ToList() : rows;
@@ -143,6 +159,27 @@ public class DaxController : ControllerBase
 
         return response.Content.Select(b => b.Value).OfType<TextBlock>()
                        .FirstOrDefault()?.Text.Trim() ?? string.Empty;
+    }
+
+    private async Task<string> FixDaxAsync(string question, string schemaPrompt, string failedDax, string error)
+    {
+        var client = new AnthropicClient() { ApiKey = _config["Anthropic:ApiKey"] };
+
+        var response = await client.Messages.Create(new MessageCreateParams
+        {
+            Model = "claude-haiku-4-5",
+            MaxTokens = 1024,
+            System = schemaPrompt,
+            Messages =
+            [
+                new() { Role = Role.User, Content = question },
+                new() { Role = Role.Assistant, Content = failedDax },
+                new() { Role = Role.User, Content = $"El DAX anterior falló con este error:\n{error}\n\nCorrige el DAX. Devuelve SOLO el DAX corregido, sin explicaciones." }
+            ]
+        });
+
+        return response.Content.Select(b => b.Value).OfType<TextBlock>()
+                       .FirstOrDefault()?.Text.Trim() ?? failedDax;
     }
 
     private async Task<string> GenerateAnswerAsync(string question, string dax, List<Dictionary<string, object?>> rows, int totalRows = -1)
