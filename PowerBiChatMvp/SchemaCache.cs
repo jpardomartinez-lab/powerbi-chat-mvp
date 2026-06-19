@@ -1,5 +1,6 @@
 using Microsoft.AnalysisServices.AdomdClient;
 using Microsoft.Identity.Client;
+using PowerBiChatMvp.Controllers;
 using System.Text;
 
 namespace PowerBiChatMvp;
@@ -13,8 +14,35 @@ public class SchemaCache
     {
         if (workspaceName != null && datasetName != null)
             _cache.Remove($"{workspaceName}|{datasetName}");
+        else if (workspaceName != null) // clave literal (ej: "ssas|server|db")
+            _cache.Remove(workspaceName);
         else
             _cache.Clear();
+    }
+
+    public async Task<string> GetPromptSsasAsync(string server, string database)
+    {
+        var key = $"ssas|{server}|{database}";
+        if (_cache.TryGetValue(key, out var cached)) return cached;
+
+        await _lock.WaitAsync();
+        try
+        {
+            if (_cache.TryGetValue(key, out cached)) return cached;
+
+            using var conn = DaxController.OpenSsasConnection(server, database);
+            var tables  = QuerySchema(conn, "SELECT * FROM $SYSTEM.TMSCHEMA_TABLES");
+            var columns = QuerySchema(conn, "SELECT * FROM $SYSTEM.TMSCHEMA_COLUMNS");
+            var measures= QuerySchema(conn, "SELECT * FROM $SYSTEM.TMSCHEMA_MEASURES");
+
+            var prompt = BuildPrompt(database, tables, columns, measures);
+            _cache[key] = prompt;
+            return prompt;
+        }
+        finally
+        {
+            _lock.Release();
+        }
     }
 
     public async Task<string> GetPromptAsync(IConfiguration config, string workspaceName, string datasetName)
@@ -119,11 +147,12 @@ public class SchemaCache
 
         // Group columns by table name via TableID join
         var colsByTable = columns
-            .Where(c => c.ContainsKey("TableID") && c.ContainsKey("ExplicitName"))
+            .Where(c => c.ContainsKey("TableID") && (c.ContainsKey("ExplicitName") || c.ContainsKey("Name")))
             .Select(c => new
             {
                 TableName = tableIdToName.GetValueOrDefault(c["TableID"]?.ToString() ?? "", ""),
-                ColName = c["ExplicitName"]?.ToString() ?? "",
+                ColName = (c.GetValueOrDefault("ExplicitName")?.ToString()?.Trim() is { Length: > 0 } en ? en
+                          : c.GetValueOrDefault("Name")?.ToString() ?? ""),
                 DataType = c.ContainsKey("ExplicitDataType") ? c["ExplicitDataType"]?.ToString() ?? "" : ""
             })
             .Where(c => !string.IsNullOrEmpty(c.TableName)
@@ -165,39 +194,24 @@ public class SchemaCache
 
         sb.AppendLine();
         sb.AppendLine("""
-            Reglas:
-            - Genera únicamente DAX.
-            - La consulta debe empezar por EVALUATE.
-            - Usa solo tablas, columnas y medidas listadas.
-            - No inventes columnas ni medidas.
-            - No expliques nada.
-            - No uses markdown.
-            - DAX NO tiene WHERE. Para filtrar usa CALCULATETABLE o FILTER dentro de SUMMARIZECOLUMNS.
-            - Para filtrar por año actual: FILTER(tabla, YEAR(tabla[columnaFecha]) = YEAR(TODAY()))
-            - Para columnas tipo Text que parecen fechas, no uses funciones de fecha.
-            - No uses DATESBETWEEN sobre columnas que no sean tipo Date.
-            - Ejemplo filtro año: SUMMARIZECOLUMNS(tabla[col], FILTER(tabla, YEAR(tabla[fecha]) = YEAR(TODAY())), "Medida", [Medida])
+            Reglas DAX:
+            - Genera únicamente DAX. La consulta debe empezar por EVALUATE.
+            - Usa solo tablas, columnas y medidas listadas arriba. No inventes nombres.
+            - No expliques nada. No uses markdown.
+            - DAX NO tiene WHERE. Para filtrar usa CALCULATETABLE o FILTER.
             - DAX NO tiene ORDER BY ni RETURN. Para ordenar usa TOPN(N, tabla, [Medida], DESC).
+            - DAX NO tiene OR como palabra clave. Usa || para OR lógico, && para AND lógico.
             - DAX NO tiene IN con subconsultas. Usa TREATAS o FILTER con RELATED.
-            - DAX NO tiene OR como palabra clave. Usa || para OR lógico y && para AND lógico.
-            - Estructura correcta para top N con filtro: EVALUATE TOPN(5, SUMMARIZECOLUMNS(..., FILTER(...)), [Medida], DESC)
-            - Cuando una columna existe en varias tablas, SIEMPRE califica con el nombre de tabla. Ejemplo: PROYECTOS[TOTAL_ISSUE_COUNT] no [TOTAL_ISSUE_COUNT].
-            - Para horas usa Worklogs[START_DATE] y Worklogs[LOGGED_TIME]/3600. Worklogs se relaciona con Issues via Worklogs[ISSUE_ID]=Issues[ISSUE_ID].
-            - Para issues usa la tabla Issues. Issues se relaciona con Projects via Issues[PROJECT_ID]=Projects[PROJECT_ID].
-            - Para cruzar Worklogs con PROYECTOS usa: SUMMARIZECOLUMNS(PROYECTOS[Clave], "Horas", [Horas]) — usa medidas en vez de joins manuales.
-            - Status de proyectos está en PROYECTOS[Status].
-            - SUMMARIZECOLUMNS con filtro de fecha: usa CALCULATETABLE(SUMMARIZECOLUMNS(...), FILTER(tabla, condicion)) NO pongas FILTER dentro de SUMMARIZECOLUMNS directamente.
-            - Sintaxis correcta con filtro: EVALUATE CALCULATETABLE(SUMMARIZECOLUMNS(tabla[col], "med", [Medida]), YEAR(Worklogs[START_DATE]) = YEAR(TODAY()))
-            - Para devolver un único valor escalar usa: EVALUATE ROW("Resultado", CALCULATE([Medida]))
-            - ROW() requiere siempre pares nombre-valor: ROW("nombre1", valor1, "nombre2", valor2). Nunca ROW con un solo argumento.
-            - No uses tabla Calendar ni DimDate — no existen. Para mes/año usa MONTH() y YEAR() sobre columnas de fecha reales.
-            - SUMMARIZECOLUMNS solo acepta columnas reales como argumentos de agrupación, NO expresiones como MONTH(). Para agrupar por mes usa ADDCOLUMNS+SUMMARIZE: EVALUATE ADDCOLUMNS(SUMMARIZE(Worklogs, Worklogs[START_DATE]), "Mes", MONTH(Worklogs[START_DATE]), "Horas", CALCULATE([Horas]))
-            - Para horas por mes del año actual usa ADDCOLUMNS+SUMMARIZE: EVALUATE ADDCOLUMNS(SUMMARIZE(FILTER(Worklogs, YEAR(Worklogs[START_DATE]) = YEAR(TODAY())), Worklogs[START_DATE]), "Mes", MONTH(Worklogs[START_DATE]), "Horas", CALCULATE([Horas]))
-            - Cuando SUMMARIZECOLUMNS agrupa por columna que existe en varias tablas, SIEMPRE usa nombre completo: Issues[ISSUE_STATUS_NAME].
-            - Para issues sin resolver: FILTER(Issues, Issues[RESOLUTION] = BLANK() && Issues[ISSUE_STATUS_NAME] <> "Done")
-            - Columnas tipo Text NO se comparan con TRUE/FALSE. Usa texto: PROYECTOS[Status] = "Active", no PROYECTOS[Status] = TRUE.
-            - Columnas tipo Boolean SÍ se comparan con TRUE/FALSE: Projects[IS_PRIVATE] = TRUE.
-            - El estado activo en PROYECTOS[Status] puede ser "In Progress", "Active" u otros valores texto. Usa SEARCH o múltiples valores si no sabes el exacto.
+            - SUMMARIZECOLUMNS solo acepta columnas reales como argumentos de agrupación, NO expresiones.
+            - SUMMARIZECOLUMNS con filtro: usa CALCULATETABLE(SUMMARIZECOLUMNS(...), condicion) — NO pongas FILTER dentro de SUMMARIZECOLUMNS directamente.
+            - Para agrupar por expresión (mes, año...) usa ADDCOLUMNS sobre SUMMARIZE.
+            - Para filtrar por año: CALCULATETABLE(SUMMARIZECOLUMNS(...), YEAR(Tabla[Fecha]) = YEAR(TODAY()))
+            - Para Top N: EVALUATE TOPN(5, SUMMARIZECOLUMNS(Tabla[Col], "Medida", [Medida]), [Medida], DESC)
+            - Para devolver escalar: EVALUATE ROW("Resultado", CALCULATE([Medida]))
+            - ROW() requiere pares nombre-valor: ROW("n1", v1, "n2", v2). Nunca ROW con un solo argumento.
+            - Cuando una columna existe en varias tablas, SIEMPRE califica con el nombre de tabla: Tabla[Columna].
+            - Columnas tipo Text NO se comparan con TRUE/FALSE. Columnas tipo Boolean SÍ.
+            - Para columnas tipo Text que parecen fechas, no uses funciones de fecha DAX.
             """);
 
         return sb.ToString();

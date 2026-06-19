@@ -9,8 +9,12 @@ namespace PowerBiChatMvp.Controllers;
 public class ChatRequest
 {
     public string Question { get; set; } = string.Empty;
+    // Modo PBI XMLA
     public string WorkspaceName { get; set; } = string.Empty;
     public string DatasetName { get; set; } = string.Empty;
+    // Modo SSAS directo
+    public string Server { get; set; } = string.Empty;
+    public string Database { get; set; } = string.Empty;
 }
 
 [ApiController]
@@ -29,10 +33,32 @@ public class DaxController : ControllerBase
     [HttpPost("chat")]
     public async Task<IActionResult> Chat([FromBody] ChatRequest request)
     {
-        if (string.IsNullOrWhiteSpace(request.WorkspaceName) || string.IsNullOrWhiteSpace(request.DatasetName))
-            return BadRequest("WorkspaceName y DatasetName son obligatorios.");
+        // Power BI objects API puede envolver valores con tags XML internos (<oii>valor</oii>)
+        static string StripXml(string? s) => System.Text.RegularExpressions.Regex.Replace(s ?? "", @"<[^>]+>", "").Trim();
+        request.WorkspaceName = StripXml(request.WorkspaceName);
+        request.DatasetName   = StripXml(request.DatasetName);
+        request.Server        = StripXml(request.Server);
+        request.Database      = StripXml(request.Database);
+        request.Question      = StripXml(request.Question);
 
-        var schemaPrompt = await _schema.GetPromptAsync(_config, request.WorkspaceName, request.DatasetName);
+        var modoPbi  = !string.IsNullOrWhiteSpace(request.WorkspaceName) && !string.IsNullOrWhiteSpace(request.DatasetName);
+        var modoSsas = !string.IsNullOrWhiteSpace(request.Server) && !string.IsNullOrWhiteSpace(request.Database);
+
+        if (!modoPbi && !modoSsas)
+            return BadRequest("Especifica (WorkspaceName+DatasetName) para PBI o (Server+Database) para SSAS directo.");
+
+        string schemaPrompt;
+        try
+        {
+            schemaPrompt = modoSsas
+                ? await _schema.GetPromptSsasAsync(request.Server, request.Database)
+                : await _schema.GetPromptAsync(_config, request.WorkspaceName, request.DatasetName);
+        }
+        catch (Exception ex)
+        {
+            var modelId = modoSsas ? $"{request.Server}/{request.Database}" : $"{request.DatasetName} en {request.WorkspaceName}";
+            return BadRequest(new { message = $"Error cargando esquema de '{modelId}': {ex.Message.Split('\n')[0].Trim()}" });
+        }
 
         var dax = await GenerateDaxAsync(request.Question, schemaPrompt);
 
@@ -49,7 +75,9 @@ public class DaxController : ControllerBase
         List<Dictionary<string, object?>> rows;
         try
         {
-            rows = await ExecuteDaxAsync(dax, request.WorkspaceName, request.DatasetName);
+            rows = modoSsas
+                ? await ExecuteDaxSsasAsync(dax, request.Server, request.Database)
+                : await ExecuteDaxAsync(dax, request.WorkspaceName, request.DatasetName);
         }
         catch (Exception ex)
         {
@@ -64,9 +92,13 @@ public class DaxController : ControllerBase
     }
 
     [HttpDelete("cache")]
-    public IActionResult ClearCache([FromQuery] string? workspace, [FromQuery] string? dataset)
+    public IActionResult ClearCache([FromQuery] string? workspace, [FromQuery] string? dataset,
+                                    [FromQuery] string? server,    [FromQuery] string? db)
     {
-        _schema.ClearCache(workspace, dataset);
+        if (server != null && db != null)
+            _schema.ClearCache($"ssas|{server}|{db}", null);
+        else
+            _schema.ClearCache(workspace, dataset);
         return Ok(new { message = "Caché limpiada." });
     }
 
@@ -170,7 +202,17 @@ public class DaxController : ControllerBase
     {
         var (connection, _) = await OpenConnectionAsync(workspaceName, datasetName);
         using var conn = connection;
+        return ExecuteReader(conn, dax);
+    }
 
+    private Task<List<Dictionary<string, object?>>> ExecuteDaxSsasAsync(string dax, string server, string database)
+    {
+        using var conn = OpenSsasConnection(server, database);
+        return Task.FromResult(ExecuteReader(conn, dax));
+    }
+
+    private static List<Dictionary<string, object?>> ExecuteReader(AdomdConnection conn, string dax)
+    {
         using var command = conn.CreateCommand();
         command.CommandText = dax;
         using var reader = command.ExecuteReader();
@@ -183,8 +225,15 @@ public class DaxController : ControllerBase
                 row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
             result.Add(row);
         }
-
         return result;
+    }
+
+    internal static AdomdConnection OpenSsasConnection(string server, string database)
+    {
+        var connStr = $"Data Source={server}; Initial Catalog={database}; Integrated Security=SSPI;";
+        var conn = new AdomdConnection(connStr);
+        conn.Open();
+        return conn;
     }
 
     internal async Task<(AdomdConnection, string)> OpenConnectionAsync(string? workspaceName = null, string? datasetName = null)

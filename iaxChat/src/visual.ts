@@ -328,10 +328,15 @@ export class Visual implements IVisual {
         while (this.chatLog.firstChild) this.chatLog.removeChild(this.chatLog.firstChild);
         try {
             const parsed = new URL(this.apiUrl);
-            const ws = parsed.searchParams.get("ws") || "";
-            const ds = parsed.searchParams.get("ds") || "";
-            const base = parsed.origin + parsed.pathname.replace(/\/chat$/, "/cache");
-            await fetch(`${base}?ws=${encodeURIComponent(ws)}&ds=${encodeURIComponent(ds)}`, { method: "DELETE" });
+            const ws     = parsed.searchParams.get("ws") || "";
+            const ds     = parsed.searchParams.get("ds") || "";
+            const server = parsed.searchParams.get("server") || "";
+            const db     = parsed.searchParams.get("db") || "";
+            const base   = parsed.origin + parsed.pathname.replace(/\/chat$/, "/cache");
+            const params = ws
+                ? `ws=${encodeURIComponent(ws)}&ds=${encodeURIComponent(ds)}`
+                : `server=${encodeURIComponent(server)}&db=${encodeURIComponent(db)}`;
+            await fetch(`${base}?${params}`, { method: "DELETE" });
         } catch { /* ignorar errores de red al limpiar */ }
         this.addBubble("Chat borrado. El esquema se recargará en la próxima consulta.", "bot");
     }
@@ -343,20 +348,28 @@ export class Visual implements IVisual {
         let baseUrl: string;
         let workspaceName: string;
         let datasetName: string;
+        let server: string;
+        let database: string;
         try {
             const parsed = new URL(this.apiUrl);
             workspaceName = parsed.searchParams.get("ws") || "";
             datasetName   = parsed.searchParams.get("ds") || "";
+            server        = parsed.searchParams.get("server") || "";
+            database      = parsed.searchParams.get("db") || "";
             parsed.searchParams.delete("ws");
             parsed.searchParams.delete("ds");
+            parsed.searchParams.delete("server");
+            parsed.searchParams.delete("db");
             baseUrl = parsed.toString();
         } catch {
-            this.addBubble("URL inválida. Configura en el panel de formato: http://servidor/api/dax/chat?ws=WORKSPACE&ds=DATASET", "bot");
+            this.addBubble("URL inválida. Ejemplos:\n• PBI: http://servidor/api/dax/chat?ws=WORKSPACE&ds=DATASET\n• SSAS: http://servidor/api/dax/chat?server=SRV\\inst&db=DATABASE", "bot");
             return;
         }
 
-        if (!workspaceName || !datasetName) {
-            this.addBubble("La URL debe incluir ?ws=WORKSPACE&ds=DATASET", "bot");
+        const modoPbi  = workspaceName && datasetName;
+        const modoSsas = server && database;
+        if (!modoPbi && !modoSsas) {
+            this.addBubble("La URL debe incluir ?ws=WORKSPACE&ds=DATASET (PBI) o ?server=SRV\\inst&db=DATABASE (SSAS)", "bot");
             return;
         }
 
@@ -369,7 +382,7 @@ export class Visual implements IVisual {
             const response = await fetch(baseUrl, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question, workspaceName, datasetName })
+                body: JSON.stringify({ question, workspaceName, datasetName, server, database })
             });
 
             if (!response.ok) {
